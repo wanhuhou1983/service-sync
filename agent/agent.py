@@ -28,8 +28,8 @@ NODE_IP = os.environ.get("NODE_IP", "")
 INTERVAL = int(os.environ.get("REPORT_INTERVAL", "30"))
 COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "")  # Where docker-compose.yml lives on this node
 
-# PG connections: JSON string like {"main":"host=... dbname=... user=... password=... password=..."}
-PG_CONNECTIONS_JSON = os.environ.get("PG_CONNECTIONS", "{}")
+# Cached PG credentials from last heartbeat response (our own node's creds)
+_last_heartbeat_pg_creds = {}
 
 try:
     import docker
@@ -278,14 +278,6 @@ def execute_deploy(task):
             "result": "ok",
         })
         print(f"  [Task {tid}] Deploy completed")
-        return  # Skip repeated error handling below
-
-        api_post(f"/api/task/{tid}/update", {
-            "status": "completed",
-            "progress": f"Deployed {img_tag or svc}",
-            "result": "ok",
-        })
-        print(f"  [Task {tid}] Deploy completed")
 
     except subprocess.TimeoutExpired:
         api_post(f"/api/task/{tid}/update", {
@@ -320,35 +312,39 @@ def execute_pg_sync(task):
     t_pass = params.get("target_password", "")
 
     # For self-sync (source == target), reuse source creds for target
-    if not t_pass and source_node == NODE_NAME:
+    if source_node == NODE_NAME:
         t_pass = s_pass
         t_user = s_user
         t_host = "127.0.0.1"
 
-    source_conn = f"host={s_host} port={s_port} dbname={db_name} user={s_user}"
-    target_conn = f"host={t_host} port={t_port} dbname={db_name} user={t_user}"
-
-    dump_args = ""
+    dump_args = []
     if mode == "schema":
-        dump_args = "--schema-only --no-owner --no-privileges"
+        dump_args = ["--schema-only", "--no-owner", "--no-privileges"]
     elif mode == "data":
-        dump_args = "--data-only --no-owner"
+        dump_args = ["--data-only", "--no-owner"]
     else:
-        dump_args = "--no-owner --no-privileges"
+        dump_args = ["--no-owner", "--no-privileges"]
 
     api_post(f"/api/task/{tid}/update", {"status": "running", "progress": f"Dumping {mode} from {source_node}..."})
 
     try:
-        # Step 1: pg_dump from source
+        # Step 1: pg_dump from source (use list args — no shell=True)
         print(f"    Dumping from source ({s_host}:{s_port})...")
         dump_env = os.environ.copy()
         if s_pass:
             dump_env["PGPASSWORD"] = s_pass
-        dump_cmd = f"pg_dump {dump_args} '{source_conn}'"
+
+        dump_cmd = [
+            "pg_dump", *dump_args,
+            "-h", s_host,
+            "-p", str(s_port),
+            "-U", s_user,
+            db_name,
+        ]
         print(f"    Running: pg_dump...")
 
         dump_proc = subprocess.Popen(
-            dump_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            dump_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=dump_env,
         )
 
@@ -362,12 +358,25 @@ def execute_pg_sync(task):
 
         # For schema sync: create DB if not exists, then restore
         if mode in ("schema", "full"):
-            createdb_cmd = f"createdb '{target_conn}' 2>/dev/null || true"
-            subprocess.run(createdb_cmd, shell=True, env=restore_env, capture_output=True, timeout=30)
+            createdb_cmd = [
+                "createdb",
+                "-h", t_host,
+                "-p", str(t_port),
+                "-U", t_user,
+                db_name,
+            ]
+            subprocess.run(createdb_cmd, env=restore_env, capture_output=True, timeout=30)
+            # createdb fails if DB exists — that's fine
 
-        restore_cmd = f"psql '{target_conn}'"
+        restore_cmd = [
+            "psql",
+            "-h", t_host,
+            "-p", str(t_port),
+            "-U", t_user,
+            db_name,
+        ]
         restore_proc = subprocess.Popen(
-            restore_cmd, shell=True, stdin=dump_proc.stdout,
+            restore_cmd, stdin=dump_proc.stdout,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env=restore_env,
         )
@@ -419,15 +428,50 @@ def execute_pg_sync(task):
         print(f"  [Task {tid}] PG sync FAILED: {e}")
 
 
-def _resolve_ip(node_name: str) -> str:
-    """Resolve node hostname to IP. Uses /etc/hosts or fallback."""
-    # Simple mapping
-    ip_map = {
-        "S1": "100.96.28.120",
-        "MacMini": "100.77.50.100",
-        "Lenovo": "100.95.148.117",
-    }
-    return ip_map.get(node_name, node_name)
+def execute_pg_query(task):
+    """Execute a SQL query on local PG and return results."""
+    tid = task["id"]
+    params = json.loads(task["params"]) if isinstance(task["params"], str) else task["params"]
+    db_name = params.get("db_name", "postgres")
+    query = params.get("query", "")
+
+    print(f"  [Task {tid}] PG Query: db={db_name}")
+    api_post(f"/api/task/{tid}/update", {"status": "running", "progress": f"Executing query..."})
+
+    try:
+        # Use heartbeat-delivered PG creds for local connection
+        creds = _last_heartbeat_pg_creds
+        host = creds.get("pg_host", "127.0.0.1")
+        port = creds.get("pg_port", "5432")
+        user = creds.get("pg_user", "postgres")
+        pw = creds.get("pg_password", "")
+
+        env = os.environ.copy()
+        if pw:
+            env["PGPASSWORD"] = pw
+
+        cmd = [
+            "psql", "-h", host, "-p", str(port), "-U", user,
+            "-d", db_name, "-c", query, "--no-align", "--tuples-only",
+        ]
+        result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=60)
+
+        if result.returncode == 0:
+            api_post(f"/api/task/{tid}/update", {
+                "status": "completed",
+                "progress": "Query executed",
+                "result": result.stdout[:2000],
+            })
+        else:
+            api_post(f"/api/task/{tid}/update", {
+                "status": "failed",
+                "progress": "Query failed",
+                "result": result.stderr[:1000],
+            })
+    except Exception as e:
+        api_post(f"/api/task/{tid}/update", {
+            "status": "failed", "progress": str(e),
+        })
 
 
 # ─── Main Loop ─────────────────────────────────────────
@@ -479,6 +523,12 @@ def main():
             if result:
                 print(f"✓ {result.get('containers', 0)} ctn, {result.get('images', 0)} img", end="")
 
+                # Cache PG credentials from heartbeat
+                pg_creds = result.get("pg_creds", {})
+                if pg_creds:
+                    global _last_heartbeat_pg_creds
+                    _last_heartbeat_pg_creds = pg_creds
+
                 # Check for pending tasks
                 tasks = result.get("tasks", [])
                 if tasks:
@@ -491,6 +541,8 @@ def main():
                             execute_deploy(task)
                         elif task_type == "pg_sync":
                             execute_pg_sync(task)
+                        elif task_type == "pg_query":
+                            execute_pg_query(task)
                         else:
                             print(f"  Unknown task type: {task_type}")
                             api_post(f"/api/task/{task['id']}/update", {

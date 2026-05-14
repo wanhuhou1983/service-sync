@@ -1,5 +1,6 @@
 """Service Dashboard - Main app with push & PG sync routes."""
 
+import asyncio
 import json
 import os
 from datetime import datetime
@@ -51,7 +52,7 @@ async def api_heartbeat(payload: HeartbeatPayload):
 
 REGISTRY_URL = os.environ.get("REGISTRY_URL", "100.96.28.120:5000")
 
-def _ensure_registry_image(img_tag: str, svc_name: str) -> str:
+def _ensure_registry_image_sync(img_tag: str, svc_name: str) -> str:
     """Push image to local registry if not already there. Returns registry-qualified tag."""
     if not img_tag:
         return img_tag
@@ -77,6 +78,11 @@ def _ensure_registry_image(img_tag: str, svc_name: str) -> str:
     return img_tag
 
 
+async def _ensure_registry_image(img_tag: str, svc_name: str) -> str:
+    """Async wrapper — runs registry push in thread pool to avoid blocking."""
+    return await asyncio.to_thread(_ensure_registry_image_sync, img_tag, svc_name)
+
+
 # ─── API: Deploy/Push ──────────────────────────────────
 
 @app.post("/api/deploy")
@@ -91,8 +97,8 @@ async def api_deploy(request: Request):
     if not all([target_node, service_name]):
         raise HTTPException(400, "Missing: target_node, service_name")
 
-    # Ensure image is in our registry
-    final_tag = _ensure_registry_image(image_tag, service_name)
+    # Ensure image is in our registry (non-blocking)
+    final_tag = await _ensure_registry_image(image_tag, service_name)
 
     # Fetch source container config for container creation on target
     run_config = get_container_run_config(source_node, service_name) if source_node else {}
@@ -159,18 +165,18 @@ async def api_pg_sync(request: Request):
     source_info = get_node(source_node) or {}
     target_info = get_node(target_node) or {}
 
+    # PG credentials passed in task params for agent execution.
+    # Passwords are cleared from params when task completes (see update_task).
     params = {
         "source_node": source_node,
         "db_name": db_name,
         "mode": sync_mode,
         "source_pg_name": source_pg_name,
         "target_pg_name": target_pg_name,
-        # Source PG connection
         "source_host": source_info.get("pg_host") or source_info.get("node_ip", ""),
         "source_port": source_info.get("pg_port", "5432"),
         "source_user": source_info.get("pg_user", "postgres"),
         "source_password": source_info.get("pg_password", ""),
-        # Target PG connection
         "target_host": target_info.get("pg_host") or "localhost",
         "target_port": target_info.get("pg_port", "5432"),
         "target_user": target_info.get("pg_user", "postgres"),

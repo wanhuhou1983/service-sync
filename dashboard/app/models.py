@@ -171,7 +171,22 @@ def save_heartbeat(payload: dict) -> dict:
             """, (node_name, c["name"], pg_db, node_name, pg_port, now))
 
     conn.commit()
+
+    # Fetch this node's PG credentials (only its own — not other nodes')
+    pg_row = conn.execute(
+        "SELECT pg_host, pg_port, pg_user, pg_password FROM nodes WHERE node_name=?",
+        (node_name,)
+    ).fetchone()
     conn.close()
+
+    pg_creds = {}
+    if pg_row and pg_row["pg_password"]:
+        pg_creds = {
+            "pg_host": pg_row["pg_host"],
+            "pg_port": pg_row["pg_port"],
+            "pg_user": pg_row["pg_user"],
+            "pg_password": pg_row["pg_password"],
+        }
 
     # Check pending tasks for this node
     pending = get_pending_tasks(node_name)
@@ -181,6 +196,7 @@ def save_heartbeat(payload: dict) -> dict:
         "containers": len(payload.get("containers", [])),
         "images": len(payload.get("images", [])),
         "tasks": pending,
+        "pg_creds": pg_creds,
     }
 
 
@@ -218,6 +234,20 @@ def update_task(task_id: int, status: str, progress: str = "", result: str = "")
         fields["started_at"] = now
     if status in ("completed", "failed"):
         fields["completed_at"] = now
+        # Clear sensitive credentials from task params after completion
+        row = conn.execute("SELECT params FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if row:
+            try:
+                p = json.loads(row["params"])
+                cleared = False
+                for k in ("source_password", "target_password"):
+                    if k in p and p[k]:
+                        p[k] = "***"
+                        cleared = True
+                if cleared:
+                    fields["params"] = json.dumps(p, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass
 
     sets = ", ".join(f"{k}=?" for k in fields)
     vals = list(fields.values()) + [task_id]
