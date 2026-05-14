@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}任务历史{% endblock %}
+
+{% block content %}
+<div class="rounded-xl border border-gray-800 overflow-hidden">
+    <div class="px-5 py-3 bg-gray-900/50 border-b border-gray-800">
+        <h2 class="font-semibold flex items-center gap-2 text-sm">
+            <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+            所有任务
+        </h2>
+    </div>
+
+    {% if tasks %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-left text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800">
+                    <th class="px-4 py-2.5 font-medium">ID</th>
+                    <th class="px-4 py-2.5 font-medium">类型</th>
+                    <th class="px-4 py-2.5 font-medium">来源</th>
+                    <th class="px-4 py-2.5 font-medium">目标</th>
+                    <th class="px-4 py-2.5 font-medium">服务</th>
+                    <th class="px-4 py-2.5 font-medium">状态</th>
+                    <th class="px-4 py-2.5 font-medium">进度</th>
+                    <th class="px-4 py-2.5 font-medium">时间</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800/30">
+                {% for t in tasks %}
+                <tr class="hover:bg-gray-900/30 transition">
+                    <td class="px-4 py-2.5 font-mono text-gray-400 text-xs">#{{ t.id }}</td>
+                    <td class="px-4 py-2.5">
+                        <span class="text-xs font-medium
+                            {% if t.task_type == 'deploy' %}text-emerald-400
+                            {% elif t.task_type == 'pg_sync' %}text-blue-400
+                            {% else %}text-gray-400{% endif %}">
+                            {% if t.task_type == 'deploy' %}📦 部署
+                            {% elif t.task_type == 'pg_sync' %}🗄️ PG同步
+                            {% else %}⚙️ {{ t.task_type }}{% endif %}
+                        </span>
+                    </td>
+                    <td class="px-4 py-2.5 font-mono text-xs text-gray-400">{{ t.source_node or '-' }}</td>
+                    <td class="px-4 py-2.5 font-mono text-xs text-gray-200">{{ t.target_node }}</td>
+                    <td class="px-4 py-2.5 text-xs text-gray-300">{{ t.service_name or '-' }}</td>
+                    <td class="px-4 py-2.5">
+                        <span class="px-1.5 py-0.5 rounded text-xs font-medium
+                            {% if t.status == 'completed' %}bg-emerald-900/30 text-emerald-400
+                            {% elif t.status == 'failed' %}bg-red-900/30 text-red-400
+                            {% elif t.status == 'running' %}bg-blue-900/30 text-blue-400
+                            {% else %}bg-gray-800/40 text-gray-400{% endif %}">
+                            {{ t.status }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-2.5 text-xs text-gray-500 max-w-40 truncate" title="{{ t.progress }}">{{ t.progress[:40] or '-' }}</td>
+                    <td class="px-4 py-2.5 text-xs text-gray-500 font-mono">{{ t.created_at[5:19] if t.created_at else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center py-12 text-gray-500 text-sm">暂无任务记录</div>
+    {% endif %}
+</div>
+{% endblock %}

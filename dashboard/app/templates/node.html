@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}{{ node_name }} - 节点详情{% endblock %}
+
+{% block content %}
+<a href="/" class="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 mb-4 transition">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+    </svg>
+    返回总览
+</a>
+
+<!-- Node Info -->
+<div class="rounded-xl border border-gray-800 bg-gray-900/30 p-5 mb-6">
+    <div class="flex items-start justify-between">
+        <div>
+            <h1 class="text-xl font-bold">{{ node_name }}</h1>
+            {% if node %}
+            <div class="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                    <span class="text-gray-500 text-xs">IP</span>
+                    <p class="font-mono text-gray-200">{{ node.node_ip }}</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 text-xs">Hostname</span>
+                    <p class="font-mono text-gray-200">{{ node.hostname }}</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 text-xs">平台</span>
+                    <p class="text-gray-200 truncate max-w-40 text-xs">{{ node.platform[:40] }}</p>
+                </div>
+                <div>
+                    <span class="text-gray-500 text-xs">Docker</span>
+                    <p class="font-mono text-gray-200 text-xs">{{ node.docker_version[:20] }}</p>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        {% if node %}
+        <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium
+            {% if node.status == 'online' %}bg-emerald-950/40 text-emerald-400 border border-emerald-800/40
+            {% else %}bg-red-950/40 text-red-400 border border-red-800/40{% endif %}">
+            <span class="w-2 h-2 rounded-full {% if node.status == 'online' %}bg-emerald-400 animate-pulse{% else %}bg-red-400{% endif %}"></span>
+            {{ node.status }}
+        </span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Containers -->
+    <div class="rounded-xl border border-gray-800 overflow-hidden">
+        <div class="px-5 py-3 bg-gray-900/50 border-b border-gray-800">
+            <h2 class="font-semibold flex items-center gap-2 text-sm">
+                <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+                </svg>
+                容器
+                {% if containers %}<span class="text-xs text-gray-500 font-normal">({{ containers|length }})</span>{% endif %}
+            </h2>
+        </div>
+        {% if containers %}
+        <div class="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-gray-500 text-xs uppercase border-b border-gray-800/50">
+                        <th class="px-4 py-2 font-medium">名称</th>
+                        <th class="px-4 py-2 font-medium">镜像</th>
+                        <th class="px-4 py-2 font-medium">状态</th>
+                        <th class="px-4 py-2 font-medium">操作</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-800/30">
+                    {% for c in containers %}
+                    <tr class="hover:bg-gray-900/30">
+                        <td class="px-4 py-2.5 font-mono text-gray-200 text-xs">{{ c.name }}</td>
+                        <td class="px-4 py-2.5 font-mono text-gray-300 text-xs truncate max-w-32" title="{{ c.image }}">{{ c.image[:40] }}</td>
+                        <td class="px-4 py-2.5">
+                            <span class="inline-flex items-center gap-1 text-xs
+                                {% if c.state == 'running' %}text-emerald-400{% else %}text-gray-500{% endif %}">
+                                <span class="w-1.5 h-1.5 rounded-full {% if c.state == 'running' %}bg-emerald-400{% else %}bg-gray-500{% endif %}"></span>
+                                {{ c.state }}
+                            </span>
+                        </td>
+                        <td class="px-4 py-2.5">
+                            <button onclick="pushDeploy('{{ node_name }}', '{{ c.name }}', '{{ c.image.split('/')[-1] if '/' in c.image else c.image }}')"
+                                    class="text-xs px-1.5 py-0.5 rounded bg-emerald-900/30 text-emerald-400 hover:bg-emerald-800/40 border border-emerald-800/30 transition">
+                                推送
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-8 text-gray-500 text-sm">暂无容器</div>
+        {% endif %}
+    </div>
+
+    <!-- Images -->
+    <div class="rounded-xl border border-gray-800 overflow-hidden">
+        <div class="px-5 py-3 bg-gray-900/50 border-b border-gray-800">
+            <h2 class="font-semibold flex items-center gap-2 text-sm">
+                <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                镜像
+                {% if images %}<span class="text-xs text-gray-500 font-normal">({{ images|length }})</span>{% endif %}
+            </h2>
+        </div>
+        {% if images %}
+        <div class="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-gray-500 text-xs uppercase border-b border-gray-800/50">
+                        <th class="px-4 py-2 font-medium">Tag</th>
+                        <th class="px-4 py-2 font-medium">大小</th>
+                        <th class="px-4 py-2 font-medium">创建</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-800/30">
+                    {% for img in images %}
+                    <tr class="hover:bg-gray-900/30">
+                        <td class="px-4 py-2.5 font-mono text-gray-200 text-xs truncate max-w-48" title="{{ img.tag }}">{{ img.tag }}</td>
+                        <td class="px-4 py-2.5 text-xs text-gray-400">
+                            {% if img.size > 1073741824 %}{{ "%.1f"|format(img.size / 1073741824) }} GB
+                            {% elif img.size > 1048576 %}{{ "%.0f"|format(img.size / 1048576) }} MB
+                            {% elif img.size > 1024 %}{{ "%.0f"|format(img.size / 1024) }} KB
+                            {% else %}{{ img.size }} B{% endif %}
+                        </td>
+                        <td class="px-4 py-2.5 text-xs text-gray-400 font-mono">{{ img.created[:10] if img.created else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-8 text-gray-500 text-sm">暂无镜像</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- PG Instances -->
+{% if pg_instances %}
+<div class="rounded-xl border border-gray-800 overflow-hidden mt-6">
+    <div class="px-5 py-3 bg-gray-900/50 border-b border-gray-800">
+        <h2 class="font-semibold flex items-center gap-2 text-sm">
+            <svg class="w-4 h-4 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+            </svg>
+            PG 实例
+        </h2>
+    </div>
+    <div class="divide-y divide-gray-800/30">
+        {% for inst in pg_instances %}
+        <div class="px-5 py-3 flex items-center justify-between hover:bg-gray-900/30">
+            <div>
+                <div class="text-sm text-gray-200">{{ inst.name }}</div>
+                <div class="text-xs text-gray-500 font-mono">{{ inst.db_name }} @ {{ inst.host }}:{{ inst.port }}</div>
+            </div>
+            <div class="flex gap-2">
+                <span class="text-xs text-gray-500">{% if inst.auto_detected %}自动发现{% else %}手动配置{% endif %}</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<script>
+function pushDeploy(targetNode, serviceName, imageTag) {
+    // Reuse the deploy modal from index.html
+    _deployData = {target_node: targetNode, service_name: serviceName, image_tag: imageTag};
+    document.getElementById('deploy-svc').textContent = serviceName;
+    document.getElementById('deploy-target').textContent = targetNode;
+    document.getElementById('deploy-tag').textContent = imageTag;
+    document.getElementById('deploy-confirm-btn').disabled = false;
+    document.getElementById('deploy-confirm-btn').textContent = '确认推送';
+    showModal('deploy-modal');
+}
+</script>
+{% endblock %}

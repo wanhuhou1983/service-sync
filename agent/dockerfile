@@ -1,0 +1,17 @@
+FROM python:3.11-alpine
+
+# Docker CLI + PostgreSQL client for pg_dump/psql
+RUN apk add --no-cache docker-cli postgresql-client
+
+WORKDIR /agent
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY agent.py .
+
+ENV DASHBOARD_URL=http://100.96.28.120:8080
+ENV REPORT_INTERVAL=30
+ENV COMPOSE_DIR=
+
+CMD ["python", "-u", "agent.py"]

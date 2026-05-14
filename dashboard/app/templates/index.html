@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+
+{% block title %}Service Dashboard - 服务对标{% endblock %}
+
+{% block content %}
+<!-- ─── Node Status Bar ────────────────────────────── -->
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+    {% for node in nodes %}
+    <div class="rounded-xl border {% if node.status == 'online' %}border-emerald-800/50 bg-emerald-950/15{% else %}border-red-800/50 bg-red-950/15{% endif %} p-4">
+        <div class="flex items-center justify-between">
+            <div>
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full {% if node.status == 'online' %}bg-emerald-400{% else %}bg-red-400{% endif %}"></span>
+                    <h3 class="font-semibold text-lg">{{ node.node_name }}</h3>
+                </div>
+                <p class="text-xs text-gray-500 font-mono mt-0.5 ml-4">{{ node.node_ip }}</p>
+            </div>
+            <div class="text-right">
+                <span class="text-xs text-gray-400">Docker {{ node.docker_version[:12] if node.docker_version else '?' }}</span>
+                <p class="text-xs text-gray-500 mt-0.5">上次: {{ node.last_seen[11:19] if node.last_seen else '-' }}</p>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    {% if not nodes %}
+    <div class="col-span-full text-center py-12 text-gray-500">
+        <p class="text-lg font-medium mb-1">等待节点上线</p>
+        <p class="text-sm">部署 Agent 后自动显示</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ─── Main Grid: Services + Tasks ────────────────── -->
+<div class="grid grid-cols-1 xl:grid-cols-4 gap-6">
+    <!-- Services Table (3/4 width) -->
+    <div class="xl:col-span-3 rounded-xl border border-gray-800 overflow-hidden" id="services-table"
+         hx-get="/" hx-trigger="refresh from:body" hx-select="#services-table" hx-swap="outerHTML">
+        <div class="px-5 py-3 bg-gray-900/50 border-b border-gray-800 flex items-center justify-between">
+            <h2 class="font-semibold flex items-center gap-2 text-sm">
+                <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                </svg>
+                服务对标
+            </h2>
+            <span class="text-xs text-gray-500">{{ services|length }} 个服务</span>
+        </div>
+
+        {% if services %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm" id="svc-table">
+                <thead>
+                    <tr class="text-left text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800">
+                        <th class="px-4 py-2.5 font-medium w-28">服务</th>
+                        {% for nn in node_names %}
+                        <th class="px-3 py-2.5 font-medium">
+                            <div class="flex items-center gap-1.5">
+                                <span class="w-1.5 h-1.5 rounded-full
+                                    {% if node_status.get(nn) == 'online' %}bg-emerald-400{% else %}bg-red-400{% endif %}"></span>
+                                {{ nn }}
+                            </div>
+                        </th>
+                        {% endfor %}
+                        <th class="px-3 py-2.5 font-medium text-center w-36">同步</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-800/40">
+                    {% for svc in services %}
+                    <tr class="hover:bg-gray-900/30 transition group" id="svc-{{ svc.name | replace('.', '-') }}">
+                        <!-- Service Name -->
+                        <td class="px-4 py-2.5 whitespace-nowrap">
+                            <div class="flex items-center gap-2">
+                                {% if svc.is_pg %}
+                                <svg class="w-4 h-4 text-blue-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+                                </svg>
+                                {% endif %}
+                                <span class="font-medium text-gray-200">{{ svc.name }}</span>
+                                {% if svc.status == 'aligned' %}
+                                <span class="text-xs text-emerald-500/70">✓</span>
+                                {% elif svc.status == 'differs' %}
+                                <span class="text-xs text-yellow-500/70">≠</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <!-- Per-node columns -->
+                        {% for nn in node_names %}
+                        <td class="px-3 py-2.5">
+                            {% set nd = svc.nodes.get(nn) %}
+                            {% if nd %}
+                            <div class="text-xs leading-tight">
+                                <div class="font-mono text-gray-200 truncate max-w-32" title="{{ nd.image }}">
+                                    {% set parts = nd.image.split('/') %}
+                                    {% set tag_parts = parts[-1].split(':') %}
+                                    <span {% if svc.status == 'differs' %}class="text-yellow-300"{% endif %}>{{ tag_parts[-1] if tag_parts|length > 1 else 'latest' }}</span>
+                                </div>
+                                <div class="flex items-center gap-1.5 mt-0.5">
+                                    <span class="w-1.5 h-1.5 rounded-full
+                                        {% if nd.state == 'running' %}bg-emerald-500{% else %}bg-gray-500{% endif %}"></span>
+                                    <span class="text-gray-500">{{ nd.state }}</span>
+                                    <span class="text-gray-600">·</span>
+                                    <span class="text-gray-600">{{ nd.started_at[5:16] if nd.started_at else '-' }}</span>
+                                </div>
+                            </div>
+                            {% else %}
+                            <span class="text-gray-700 text-xs">—</span>
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                        <!-- Sync Pair Dropdown -->
+                        <td class="px-3 py-2.5 text-center">
+                            <select onchange="syncAction('{{ svc.name }}', this.value)"
+                                    class="text-xs px-2 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 cursor-pointer hover:border-emerald-600 transition w-full">
+                                <option value="">选择配对</option>
+                                <option value="s1-lenovo">S1 ↔ Lenovo</option>
+                                <option value="s1-mac">S1 ↔ MacMini</option>
+                                <option value="s1-tencent">S1 ↔ TencentCloud</option>
+                                <option value="mac-tencent">MacMini ↔ TencentCloud</option>
+                                <option value="lenovo-mac">Lenovo ↔ MacMini</option>
+                                <option value="lenovo-tencent">Lenovo ↔ TencentCloud</option>
+                                <option value="all">🌐 全同步</option>
+                            </select>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-12 text-gray-500">
+            <p class="text-base font-medium mb-1">暂无服务数据</p>
+            <p class="text-sm">等待 Agent 上报后显示多机服务对比</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Task Panel (1/4 width) -->
+    <div class="rounded-xl border border-gray-800 overflow-hidden">
+        <div class="px-4 py-3 bg-gray-900/50 border-b border-gray-800 flex items-center justify-between">
+            <h2 class="font-semibold text-sm flex items-center gap-2">
+                <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                </svg>
+                最近任务
+            </h2>
+            <a href="/tasks" class="text-xs text-emerald-500 hover:text-emerald-400">查看全部 →</a>
+        </div>
+        <div class="divide-y divide-gray-800/30 max-h-[500px] overflow-y-auto" id="task-list">
+            {% if tasks %}
+            {% for t in tasks %}
+            <div class="px-4 py-2.5 text-xs hover:bg-gray-900/30 transition" id="task-{{ t.id }}">
+                <div class="flex items-center justify-between">
+                    <span class="font-mono text-gray-300">
+                        {% if t.task_type == 'deploy' %}📦 部署{% elif t.task_type == 'pg_sync' %}🗄️ PG同步{% else %}⚙️ {{ t.task_type }}{% endif %}
+                    </span>
+                    <span class="px-1.5 py-0.5 rounded text-xs font-medium
+                        {% if t.status == 'completed' %}bg-emerald-900/30 text-emerald-400
+                        {% elif t.status == 'failed' %}bg-red-900/30 text-red-400
+                        {% elif t.status == 'running' %}bg-blue-900/30 text-blue-400
+                        {% else %}bg-gray-800/40 text-gray-400{% endif %}">
+                        {{ t.status }}
+                    </span>
+                </div>
+                <div class="text-gray-500 mt-0.5">
+                    {{ t.target_node }}{% if t.source_node %} ← {{ t.source_node }}{% endif %}
+                    {% if t.service_name %} · {{ t.service_name }}{% endif %}
+                </div>
+                <div class="text-gray-600 mt-0.5">{{ t.created_at[5:19] }}</div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="px-4 py-8 text-center text-gray-600 text-xs">暂无任务记录</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- ─── Deploy Confirmation Modal ──────────────────── -->
+<div id="deploy-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 hidden items-center justify-center">
+    <div class="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md p-6 shadow-2xl">
+        <h3 class="text-lg font-semibold mb-4">确认推送</h3>
+        <div id="deploy-modal-body" class="text-sm text-gray-300 space-y-3">
+            <p>即将推送 <span id="deploy-svc" class="font-mono text-emerald-400"></span></p>
+            <p id="deploy-detail" class="text-gray-400"></p>
+        </div>
+        <div class="flex gap-3 mt-6">
+            <button onclick="closeModal('deploy-modal')" class="flex-1 px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm transition">取消</button>
+            <button id="deploy-confirm-btn" class="flex-1 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium transition">确认推送</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── Node data from server ──────────────────────────
+var _servicesData = {{ services_json|safe }};
+var _nodeNames = {{ node_names_json|safe }};
+
+// Pair definitions
+var _pairs = {
+    's1-lenovo': ['S1', 'Lenovo'],
+    'mac-tencent': ['MacMini', 'TencentCloud'],
+    's1-mac': ['S1', 'MacMini'],
+    's1-tencent': ['S1', 'TencentCloud'],
+    'lenovo-mac': ['Lenovo', 'MacMini'],
+    'lenovo-tencent': ['Lenovo', 'TencentCloud'],
+    'all': null,
+};
+
+// ─── Sync Action ────────────────────────────────────
+function syncAction(svcName, pairKey) {
+    if (!pairKey) return;
+
+    // Find service data
+    var svc = null;
+    for (var i = 0; i < _servicesData.length; i++) {
+        if (_servicesData[i].name === svcName) {
+            svc = _servicesData[i];
+            break;
+        }
+    }
+    if (!svc) { showToast('❌ 服务数据未找到', 'error'); return; }
+
+    var pair = _pairs[pairKey];
+
+    if (pairKey === 'all') {
+        // Sync to all running nodes: push from each running node to others
+        var running = [];
+        for (var j = 0; j < _nodeNames.length; j++) {
+            var nd = svc.nodes[_nodeNames[j]];
+            if (nd && nd.state === 'running') running.push(_nodeNames[j]);
+        }
+        if (running.length < 2) {
+            showToast('⚠️ 该服务只在 ' + running.join(', ') + ' 上运行，无需同步', 'info');
+            return;
+        }
+        for (var a = 0; a < running.length; a++) {
+            for (var b = a + 1; b < running.length; b++) {
+                createSyncTask(svc, running[a], running[b], true);
+            }
+        }
+        showToast('🔄 已创建全同步任务，见右侧面板', 'info');
+        return;
+    }
+
+    var left = pair[0];
+    var right = pair[1];
+    var ndLeft = svc.nodes[left];
+    var ndRight = svc.nodes[right];
+
+    if (!ndLeft && !ndRight) {
+        showToast('⚠️ ' + left + ' 和 ' + right + ' 都没有此服务', 'info');
+        return;
+    }
+
+    if (ndLeft && ndRight) {
+        // Both have it — show confirmation dialog for direction
+        var leftTag = ndLeft.image.split(':').pop() || 'latest';
+        var rightTag = ndRight.image.split(':').pop() || 'latest';
+        var bothRunning = (ndLeft.state === 'running' && ndRight.state === 'running');
+
+        if (leftTag === rightTag && bothRunning) {
+            showToast('✓ 版本一致 (' + leftTag + ')，无需同步', 'success');
+            return;
+        }
+
+        // Show deploy modal with both options
+        showDeployDialog(svc, left, right, ndLeft, ndRight);
+    } else {
+        // Only one has it — push the full image reference
+        var source = ndLeft ? left : right;
+        var target = ndLeft ? right : left;
+        var tag = (ndLeft ? ndLeft.image : ndRight.image) || '';
+        if (!tag) { showToast('⚠️ 缺少镜像信息，无法推送', 'error'); return; }
+        // Show confirmation before pushing
+        var descHtml = '<p>服务 <span class="font-mono text-emerald-400">' + svc.name + '</span></p>';
+        descHtml += '<p class="mt-2 text-xs text-gray-400">将镜像推送到节点</p>';
+        descHtml += '<p class="text-sm font-mono mt-1">' + source + '  →  ' + target + '</p>';
+        descHtml += '<p class="text-xs text-gray-500 mt-2 truncate max-w-full">' + tag + '</p>';
+        document.getElementById('deploy-svc').textContent = svc.name;
+        document.getElementById('deploy-detail').innerHTML = descHtml;
+        var confirmBtn = document.getElementById('deploy-confirm-btn');
+        confirmBtn.onclick = function() {
+            closeModal('deploy-modal');
+            confirmAndPush(svcName, target, tag, source);
+        };
+        showModal('deploy-modal');
+    }
+}
+
+function showDeployDialog(svc, left, right, ndLeft, ndRight) {
+    var leftTag = (ndLeft && ndLeft.image || '').split(':').pop() || 'latest';
+    var rightTag = (ndRight && ndRight.image || '').split(':').pop() || 'latest';
+
+    var html = '<p>服务: <span class="font-mono text-emerald-400">' + svc.name + '</span></p>';
+    html += '<div class="mt-3 space-y-2" id="sync-options">';
+
+    var hasRunning = false;
+    if (ndLeft && ndLeft.state === 'running') {
+        hasRunning = true;
+        html += '<label class="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:border-emerald-600 border border-emerald-700/50">';
+        html += '<input type="radio" name="sync-direction" value="' + left + '-->' + right + '" checked>';
+        html += '<span class="text-xs">' + left + ' (' + leftTag + ')  →  ' + right + '</span></label>';
+    }
+    if (ndRight && ndRight.state === 'running') {
+        hasRunning = true;
+        html += '<label class="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:border-emerald-600 border border-gray-700">';
+        html += '<input type="radio" name="sync-direction" value="' + right + '-->' + left + '">';
+        html += '<span class="text-xs">' + right + ' (' + rightTag + ')  →  ' + left + '</span></label>';
+    }
+    if (!hasRunning) {
+        html += '<p class="text-gray-500 text-xs text-center py-2">两个节点上该服务均未运行</p>';
+    }
+    html += '</div>';
+
+    document.getElementById('deploy-svc').textContent = svc.name;
+    document.getElementById('deploy-detail').innerHTML = html;
+
+    var confirmBtn = document.getElementById('deploy-confirm-btn');
+    confirmBtn.onclick = function() {
+        var sel = document.querySelector('#sync-options input[name="sync-direction"]:checked');
+        if (!sel) {
+            showToast('无可用同步方向', 'error');
+            return;
+        }
+        var parts = sel.value.split('-->');
+        var source = parts[0].trim();
+        var target = parts[1].trim();
+        var tag = (source === left ? (ndLeft && ndLeft.image || '') : (ndRight && ndRight.image || ''));
+        if (!tag) { showToast('⚠️ 缺少镜像信息', 'error'); return; }
+        closeModal('deploy-modal');
+        confirmAndPush(svc.name, target, tag, source);
+    };
+    showModal('deploy-modal');
+}
+
+function confirmAndPush(svcName, target, tag, source) {
+    fetch('/api/deploy', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            target_node: target,
+            service_name: svcName,
+            image_tag: tag,
+            source_node: source,
+        }),
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.task_id) {
+            showToast('✅ ' + source + '→' + target + ' 任务 #' + data.task_id, 'success');
+            pollTask(data.task_id);
+        }
+    })
+    .catch(function(e) {
+        showToast('❌ 创建任务失败: ' + e.message, 'error');
+    });
+}
+
+function createSyncTask(svc, nodeA, nodeB, silent) {
+    var ndA = svc.nodes[nodeA];
+    var ndB = svc.nodes[nodeB];
+    if (!ndA || !ndB) return;
+    if (ndA.state !== 'running' && ndB.state !== 'running') return;
+
+    // Push from A to B if A is running
+    if (ndA.state === 'running') {
+        var tagA = ndA.image.split(':').pop() || 'latest';
+        fetch('/api/deploy', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                target_node: nodeB,
+                service_name: svc.name,
+                image_tag: tagA,
+                source_node: nodeA,
+            }),
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            if (data.task_id) pollTask(data.task_id);
+        }).catch(function() {});
+    }
+    // Push from B to A if B is running
+    if (ndB.state === 'running') {
+        var tagB = ndB.image.split(':').pop() || 'latest';
+        fetch('/api/deploy', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                target_node: nodeA,
+                service_name: svc.name,
+                image_tag: tagB,
+                source_node: nodeB,
+            }),
+        }).then(function(r) { return r.json(); }).then(function(data) {
+            if (data.task_id) pollTask(data.task_id);
+        }).catch(function() {});
+    }
+}
+
+// ─── Task polling ───────────────────────────────────
+function pollTask(taskId) {
+    var interval = setInterval(function() {
+        fetch('/api/tasks/' + taskId)
+        .then(function(r) { return r.json(); })
+        .then(function(task) {
+            var row = document.getElementById('task-' + task.id);
+            if (row) {
+                var statusEl = row.querySelector('span:last-child');
+                if (statusEl) {
+                    statusEl.textContent = task.status;
+                    statusEl.className = 'px-1.5 py-0.5 rounded text-xs font-medium ' +
+                        (task.status === 'completed' ? 'bg-emerald-900/30 text-emerald-400' :
+                         task.status === 'failed' ? 'bg-red-900/30 text-red-400' :
+                         task.status === 'running' ? 'bg-blue-900/30 text-blue-400' :
+                         'bg-gray-800/40 text-gray-400');
+                }
+            }
+            if (task.status === 'completed' || task.status === 'failed') {
+                clearInterval(interval);
+                showToast(task.status === 'completed' ? '✅ 任务 ' + taskId + ' 完成' : '❌ 任务 ' + taskId + ' 失败',
+                    task.status === 'completed' ? 'success' : 'error');
+                htmx.trigger('#services-table', 'refresh');
+            }
+        })
+        .catch(function() { clearInterval(interval); });
+    }, 2000);
+}
+
+// ─── Modal helpers ──────────────────────────────────
+function showModal(id) {
+    document.getElementById(id).classList.remove('hidden');
+    document.getElementById(id).classList.add('flex');
+}
+function closeModal(id) {
+    document.getElementById(id).classList.add('hidden');
+    document.getElementById(id).classList.remove('flex');
+}
+
+// ─── Toast ──────────────────────────────────────────
+function showToast(msg, type) {
+    var toast = document.createElement('div');
+    toast.className = 'fixed bottom-4 right-4 px-4 py-2.5 rounded-lg text-sm shadow-lg z-50 transition ' +
+        (type === 'success' ? 'bg-emerald-800 text-emerald-100' :
+         type === 'error' ? 'bg-red-800 text-red-100' : 'bg-blue-800 text-blue-100');
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(function() { toast.remove(); }, 4500);
+}
+</script>
+{% endblock %}

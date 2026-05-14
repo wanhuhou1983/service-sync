@@ -1,0 +1,59 @@
+# Service Dashboard v2 - Docker Compose
+# Run on S1 (100.96.28.120)
+
+services:
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: svc-dashboard
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - dashboard-data:/data
+    environment:
+      - TZ=Asia/Shanghai
+      - DB_PATH=/data/nodes.db
+    restart: unless-stopped
+    networks:
+      - dashboard-net
+
+  registry:
+    image: registry:2
+    container_name: svc-registry
+    ports:
+      - "5000:5000"
+    environment:
+      - REGISTRY_STORAGE_DELETE_ENABLED=true
+      - TZ=Asia/Shanghai
+    volumes:
+      - registry-data:/var/lib/registry
+    restart: unless-stopped
+    networks:
+      - dashboard-net
+
+  registry-ui:
+    image: joxit/docker-registry-ui:latest
+    container_name: svc-registry-ui
+    ports:
+      - "5001:80"
+    environment:
+      - REGISTRY_TITLE=S1 Docker Registry
+      - REGISTRY_URL=http://registry:5000
+      - SINGLE_REGISTRY=true
+      - DELETE_IMAGES_ENABLED=true
+      - SHOW_CATALOG_NB_TAGS=true
+    depends_on:
+      - registry
+    restart: unless-stopped
+    networks:
+      - dashboard-net
+
+volumes:
+  dashboard-data:
+  registry-data:
+
+networks:
+  dashboard-net:
+    driver: bridge

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Service Dashboard{% endblock %}</title>
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&family=JetBrains+Mono:wght@400;500&display=swap');
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+    <!-- Nav -->
+    <nav class="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-14">
+                <div class="flex items-center gap-2">
+                    <a href="/" class="flex items-center gap-2 hover:opacity-80 transition px-2 py-1 rounded-lg {% if request.url.path == '/' %}bg-gray-800/50{% endif %}">
+                        <svg class="w-5 h-5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"/>
+                        </svg>
+                        <span class="font-semibold">Service Dashboard</span>
+                    </a>
+                    <a href="/tasks" class="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 transition px-3 py-1.5 rounded-lg {% if '/tasks' in request.url.path %}bg-gray-800/50 text-gray-100{% endif %}">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                        </svg>
+                        任务
+                    </a>
+                    <a href="/pg" class="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 transition px-3 py-1.5 rounded-lg {% if '/pg' in request.url.path %}bg-gray-800/50 text-gray-100{% endif %}">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+                        </svg>
+                        PG
+                    </a>
+                </div>
+                <div class="flex items-center gap-3 text-sm text-gray-400">
+                    <span id="live-indicator" class="flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Live
+                    </span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Toast notification container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+    <script>
+    // Show toast notification
+    window.showToast = function(message, type) {
+        type = type || 'info';
+        var colors = {info: 'bg-blue-800', success: 'bg-emerald-800', error: 'bg-red-800', warning: 'bg-yellow-800'};
+        var el = document.createElement('div');
+        el.className = (colors[type] || colors.info) + ' text-white px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium transition-all duration-300 opacity-0 translate-y-2';
+        el.textContent = message;
+        document.getElementById('toast-container').appendChild(el);
+        requestAnimationFrame(function() { el.classList.remove('opacity-0', 'translate-y-2'); });
+        setTimeout(function() { el.classList.add('opacity-0', 'translate-y-2'); setTimeout(function() { el.remove(); }, 300); }, 4000);
+    };
+
+    // HTMX response handling: show toasts
+    document.body.addEventListener('htmx:beforeSwap', function(e) {
+        var msg = e.detail.xhr.getResponseHeader('X-Toast-Message');
+        var type = e.detail.xhr.getResponseHeader('X-Toast-Type') || 'info';
+        if (msg) showToast(msg, type);
+    });
+
+    // Auto refresh overview every 15s
+    setInterval(function() {
+        var table = document.getElementById('services-table');
+        if (table) htmx.trigger(table, 'refresh');
+    }, 15000);
+    </script>
+</body>
+</html>
