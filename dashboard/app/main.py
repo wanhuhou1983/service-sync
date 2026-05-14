@@ -195,14 +195,19 @@ async def api_pg_sync(request: Request):
 
 @app.post("/api/pg-query")
 async def api_pg_query(request: Request):
-    """Execute a SQL query on a node's PG and return results."""
+    """Execute a SQL query on a node's PG and return results. SELECT only."""
     data = await request.json()
     node_name = data.get("node_name")
     db_name = data.get("db_name", "postgres")
-    query = data.get("query", "")
+    query = data.get("query", "").strip()
 
     if not all([node_name, query]):
         raise HTTPException(400, "Missing: node_name, query")
+
+    # Security: only allow SELECT statements
+    first_word = query.split()[0].upper() if query.split() else ""
+    if first_word not in ("SELECT", "WITH", "EXPLAIN"):
+        raise HTTPException(403, "Only SELECT/WITH/EXPLAIN queries are allowed")
 
     task = create_task(
         task_type="pg_query",

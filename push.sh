@@ -8,8 +8,7 @@ for item in (data.get('items', data) if isinstance(data, dict) else data):
     if isinstance(item, dict) and 'github' in item.get('name','').lower():
         print(item.get('notes','').strip())
 ")
-rm -f push_fixes.sh
 git add -A
-git commit -m "chore: remove temp push script"
+git commit -m "fix: restrict pg_query to SELECT/WITH/EXPLAIN only (SQL injection prevention)"
 git push "https://wanhuhou1983:${TOKEN}@github.com/wanhuhou1983/service-sync.git" main
 rm -f "$0"
