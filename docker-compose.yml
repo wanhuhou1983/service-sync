@@ -1,20 +1,23 @@
 # Service Dashboard v2 - Docker Compose
 # Run on S1 (100.96.28.120)
+# All services survive Windows reboot with restart: unless-stopped
 
 services:
   dashboard:
     build:
       context: ./dashboard
       dockerfile: Dockerfile
+    image: 127.0.0.1:5000/svc-dashboard:latest
     container_name: svc-dashboard
     ports:
-      - "8080:8080"
+      - "8081:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - dashboard-data:/data
     environment:
       - TZ=Asia/Shanghai
       - DB_PATH=/data/nodes.db
+      - REGISTRY_URL=127.0.0.1:5000
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -24,6 +27,21 @@ services:
     restart: unless-stopped
     networks:
       - dashboard-net
+
+  agent:
+    image: 127.0.0.1:5000/svc-agent:latest
+    container_name: svc-agent
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DASHBOARD_URL=http://127.0.0.1:8081
+      - NODE_NAME=S1
+      - NODE_IP=100.96.28.120
+      - REPORT_INTERVAL=30
+    restart: unless-stopped
+    depends_on:
+      - registry
 
   registry:
     image: registry:2

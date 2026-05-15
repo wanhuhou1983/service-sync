@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -309,6 +310,62 @@ async def node_detail(request: Request, node_name: str):
         "images": images,
         "pg_instances": pg_instances,
     })
+
+
+# ─── Startup: Auto-Recovery ───────────────────────────
+
+def _ensure_agent_running():
+    """On dashboard startup, ensure local agent is running (recover after reboot)."""
+    try:
+        import docker
+        client = docker.from_env()
+        agent_name = "svc-agent"
+        registry_url = os.environ.get("REGISTRY_URL", "127.0.0.1:5000")
+        agent_image = f"{registry_url}/svc-agent:latest"
+
+        try:
+            container = client.containers.get(agent_name)
+            if container.status == "running":
+                print(f"[Startup] Agent {agent_name} already running")
+                return
+            print(f"[Startup] Agent {agent_name} exists but status={container.status}, restarting...")
+            container.restart(timeout=10)
+            print(f"[Startup] Agent restarted")
+            return
+        except docker.errors.NotFound:
+            print(f"[Startup] Agent {agent_name} not found, creating...")
+
+        # Re-pull latest image
+        try:
+            client.images.pull(agent_image)
+        except Exception as e:
+            print(f"[Startup] Pull failed: {e}, trying local tag...")
+
+        # Create container
+        client.containers.run(
+            agent_image,
+            name=agent_name,
+            detach=True,
+            restart_policy={"Name": "unless-stopped"},
+            network_mode="host",
+            volumes=["/var/run/docker.sock:/var/run/docker.sock"],
+            environment=[
+                f"DASHBOARD_URL=http://127.0.0.1:8081",
+                "NODE_NAME=S1",
+                "NODE_IP=100.96.28.120",
+                "REPORT_INTERVAL=30",
+            ],
+        )
+        print(f"[Startup] Agent {agent_name} created successfully")
+    except Exception as e:
+        print(f"[Startup] Agent auto-recovery failed: {e}")
+
+
+@app.on_event("startup")
+async def startup():
+    print("=== Service Dashboard v2 starting ===")
+    # Run agent recovery in background thread to avoid blocking startup
+    threading.Thread(target=_ensure_agent_running, daemon=True).start()
 
 
 @app.get("/health")
